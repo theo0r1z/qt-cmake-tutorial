@@ -1,0 +1,54 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 19,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "widgets-basic",
+      "displayName": "Qt Widgets basic example",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/widgets-basic",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STUDY_BUILD_WIDGETS_BASIC": "ON"
+      }
+    },
+    {
+      "name": "multi-project",
+      "displayName": "Qt multi-project example",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/multi-project",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STUDY_BUILD_MULTI_PROJECT": "ON"
+      }
+    },
+    {
+      "name": "qml-app",
+      "displayName": "Qt QML example",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/qml-app",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STUDY_BUILD_QML_APP": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "widgets-basic",
+      "configurePreset": "widgets-basic"
+    },
+    {
+      "name": "multi-project",
+      "configurePreset": "multi-project"
+    },
+    {
+      "name": "qml-app",
+      "configurePreset": "qml-app"
+    }
+  ]
+}
