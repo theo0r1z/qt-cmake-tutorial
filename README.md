@@ -3,6 +3,7 @@
 这是一套面向 Qt 6 开发的 CMake 教程与示例仓库，基于 Qt Creator/Qt 生成的标准 `CMakeLists.txt` 写法，扩展到真实工程常见的组织方式：
 
 - 单个 Widgets 应用
+- CMake 基础语法、变量、列表、条件、作用域、target 依赖逐项拆解
 - 单应用也保留根 `CMakeLists.txt`，应用 target 放到子目录，方便未来无痛扩展
 - 一个仓库包含多个应用和多个库
 - 多项目下面继续嵌套子项目、插件或功能模块

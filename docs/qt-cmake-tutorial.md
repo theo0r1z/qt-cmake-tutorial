@@ -41,7 +41,552 @@ target_link_libraries(untitled30
 
 推荐你把“工程等于 targets 的集合”作为主线理解 CMake。目录只是组织方式，真正决定编译、链接、安装、IDE 展示的是 target。
 
-## 2. 推荐目录结构
+## 2. CMake 语法逐项解释
+
+这一章先不谈“大工程怎么组织”，只解释 CMake 语言本身。CMakeLists 看起来像脚本，但现代 CMake 的核心不是“执行一堆命令”，而是“声明一个个 target，并把属性挂到 target 上”。
+
+### 2.1 CMakeLists.txt 是什么
+
+`CMakeLists.txt` 是 CMake 默认读取的工程描述文件。文件名必须这样写：
+
+```text
+CMakeLists.txt
+```
+
+逐项解释：
+
+- `CMake`：工具名，表示这个文件给 CMake 读取。
+- `Lists`：历史命名，表示里面是一组命令列表。
+- `.txt`：普通文本文件，不是二进制工程文件。
+
+CMake 配置工程时从 `-S` 指定的源码目录开始找根 `CMakeLists.txt`：
+
+```powershell
+cmake -S . -B build
+```
+
+这里：
+
+- `cmake`：运行 CMake 程序。
+- `-S .`：source dir，源码目录是当前目录。
+- `-B build`：binary dir，构建目录是 `build`。
+
+CMake 会读取当前目录的 `CMakeLists.txt`，执行里面的命令，生成 Visual Studio、Ninja、Makefile 等后端工程文件。
+
+### 2.2 CMake 命令的基本格式
+
+CMake 命令统一长这样：
+
+```cmake
+command_name(argument1 argument2 argument3)
+```
+
+逐项解释：
+
+- `command_name`：命令名，例如 `project`、`add_subdirectory`、`target_link_libraries`。
+- `(`：参数列表开始。
+- `argument1 argument2`：参数，参数之间用空白分隔，可以换行。
+- `)`：参数列表结束。
+
+下面两种写法等价：
+
+```cmake
+project(MyApp LANGUAGES CXX)
+```
+
+```cmake
+project(
+    MyApp
+    LANGUAGES CXX
+)
+```
+
+教程推荐多行写法，因为参数多的时候更清楚，也更方便 Git diff。
+
+CMake 命令名大小写不敏感，下面也能运行：
+
+```cmake
+PROJECT(MyApp LANGUAGES CXX)
+```
+
+但现代项目统一使用小写命令名：
+
+```cmake
+project(MyApp LANGUAGES CXX)
+```
+
+参数大小写通常敏感。`CXX`、`PRIVATE`、`PUBLIC`、`REQUIRED` 这类关键字应按文档写。
+
+### 2.3 注释、空白和换行
+
+单行注释用 `#`：
+
+```cmake
+# This is a comment.
+add_subdirectory(apps/MyApp)
+```
+
+`#` 后面的内容不会被 CMake 当成命令执行。
+
+空行没有语义，只用于分组：
+
+```cmake
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+
+qt_standard_project_setup(REQUIRES 6.5 SUPPORTS_UP_TO 6.11)
+
+add_subdirectory(apps/MyApp)
+```
+
+推荐用空行隔开“找依赖”“项目 setup”“添加子目录”等逻辑块。
+
+### 2.4 字符串、普通参数和引号
+
+CMake 参数可以不加引号：
+
+```cmake
+project(MyQtProject)
+```
+
+这里 `MyQtProject` 是一个普通参数。
+
+带空格的字符串必须加引号：
+
+```cmake
+project(MyQtProject DESCRIPTION "My Qt application")
+```
+
+如果不加引号：
+
+```cmake
+project(MyQtProject DESCRIPTION My Qt application)
+```
+
+CMake 会把它拆成三个参数：`My`、`Qt`、`application`，含义就变了。
+
+建议规则：
+
+- target 名、变量名、模块名：不加引号。
+- 描述文字、路径中可能有空格的值：加引号。
+- `if()` 里的普通变量判断：现代 CMake 通常不强制加引号，但路径和字符串比较时建议加。
+
+### 2.5 变量和变量展开
+
+定义变量：
+
+```cmake
+set(MY_APP_NAME MyApp)
+```
+
+使用变量：
+
+```cmake
+qt_add_executable(${MY_APP_NAME}
+    main.cpp
+)
+```
+
+逐项解释：
+
+- `set`：设置变量。
+- `MY_APP_NAME`：变量名。
+- `MyApp`：变量值。
+- `${MY_APP_NAME}`：变量展开，把变量值替换到当前位置。
+
+变量名建议使用大写加下划线：
+
+```cmake
+set(PROJECT_NAMESPACE Study)
+```
+
+不要滥用变量。现代 CMake 更推荐把信息挂到 target 上，而不是用一堆全局变量传来传去。
+
+### 2.6 列表
+
+CMake 的列表本质上是用分号分隔的字符串。下面写法很常见：
+
+```cmake
+set(APP_SOURCES
+    main.cpp
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+)
+```
+
+然后使用：
+
+```cmake
+qt_add_executable(MyApp
+    ${APP_SOURCES}
+)
+```
+
+小项目可以直接把源文件写在 target 里；源文件很多时，用变量分组也可以。但要注意：最终还是要传给 target。
+
+更现代的方式是直接使用 `target_sources()`：
+
+```cmake
+target_sources(MyApp
+    PRIVATE
+        main.cpp
+        mainwindow.cpp
+)
+```
+
+### 2.7 if 条件
+
+基本格式：
+
+```cmake
+if(CONDITION)
+    message(STATUS "Condition is true")
+endif()
+```
+
+常见用法：
+
+```cmake
+option(BUILD_TOOLS "Build developer tools" OFF)
+
+if(BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+```
+
+逐项解释：
+
+- `option`：定义一个可由用户开关的缓存变量。
+- `BUILD_TOOLS`：变量名。
+- `"Build developer tools"`：给 CMake GUI、ccmake、IDE 看的说明。
+- `OFF`：默认关闭。
+- `if(BUILD_TOOLS)`：如果变量为真，就执行内部命令。
+- `endif()`：结束条件块。
+
+命令行启用：
+
+```powershell
+cmake -S . -B build -DBUILD_TOOLS=ON
+```
+
+这里 `-D` 表示定义 CMake cache 变量。
+
+### 2.8 作用域：目录、函数、target
+
+CMake 有目录作用域。每个 `add_subdirectory()` 会进入一个新的目录作用域：
+
+```cmake
+add_subdirectory(apps/MyApp)
+```
+
+进入 `apps/MyApp/CMakeLists.txt` 后：
+
+- 子目录可以读到父目录中很多普通变量。
+- 子目录里新设置的普通变量默认不会自动改回父目录。
+- target 是全局可见的，只要已经被创建，后续目录可以链接它。
+
+这就是为什么标准版推荐：
+
+```cmake
+add_subdirectory(libs/CoreKit)
+add_subdirectory(apps/MyApp)
+```
+
+先创建库 target，再创建 app target，app 就能链接库：
+
+```cmake
+target_link_libraries(MyApp
+    PRIVATE
+        Project::CoreKit
+)
+```
+
+现代 CMake 最重要的作用域是 target 作用域。你应该把 include 目录、编译定义、链接库、源文件都绑定到某个 target，而不是写成全局设置。
+
+### 2.9 PUBLIC、PRIVATE、INTERFACE
+
+这是 CMake 教程里最重要的一组词。
+
+```cmake
+target_link_libraries(UiKit
+    PUBLIC
+        Qt::Widgets
+    PRIVATE
+        Project::InternalHelper
+)
+```
+
+逐项解释：
+
+- `target_link_libraries`：给某个 target 添加链接依赖。
+- `UiKit`：被设置的 target。
+- `PUBLIC`：当前 target 需要，链接当前 target 的消费者也需要。
+- `PRIVATE`：只有当前 target 自己需要，消费者不需要知道。
+- `INTERFACE`：当前 target 自己不需要编译使用，只传递给消费者。
+
+判断方法：
+
+- 公开头文件里出现了某个依赖的类型：一般用 `PUBLIC`。
+- 只有 `.cpp` 里用到了某个依赖：一般用 `PRIVATE`。
+- 纯头文件库、配置包、编译选项集合：常用 `INTERFACE`。
+
+例子：
+
+```cpp
+// include/UiKit/bannerwidget.h
+#include <QWidget>
+```
+
+因为公开头文件包含了 `QWidget`，所以 `UiKit` 对 `Qt::Widgets` 的依赖应该是 `PUBLIC`：
+
+```cmake
+target_link_libraries(UiKit
+    PUBLIC
+        Qt::Widgets
+)
+```
+
+这样 app 只要链接 `UiKit`，也会自动获得 Qt Widgets 的 include、编译定义和链接信息。
+
+### 2.10 逐句拆解标准 Qt Widgets CMakeLists
+
+下面是一份最小 Qt Widgets app 的 CMake：
+
+```cmake
+cmake_minimum_required(VERSION 3.19)
+```
+
+逐项解释：
+
+- `cmake_minimum_required`：声明本工程要求的最低 CMake 版本。
+- `VERSION`：关键字，后面跟版本号。
+- `3.19`：最低版本。低于这个版本的 CMake 会直接报错。
+
+为什么要写在第一行：它还会设置 CMake policy 的默认行为，影响后续命令解释方式。
+
+```cmake
+project(MyQtProject
+    VERSION 1.0.0
+    DESCRIPTION "My Qt application"
+    LANGUAGES CXX
+)
+```
+
+逐项解释：
+
+- `project`：声明项目。
+- `MyQtProject`：项目名，会影响 `${PROJECT_NAME}`。
+- `VERSION 1.0.0`：项目版本，会设置 `${PROJECT_VERSION}`。
+- `DESCRIPTION "My Qt application"`：项目描述。
+- `LANGUAGES CXX`：项目使用 C++。`CXX` 是 CMake 对 C++ 语言的名字，不写成 `CPP`。
+
+```cmake
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+```
+
+逐项解释：
+
+- `CMAKE_CXX_STANDARD`：默认 C++ 标准。
+- `17`：使用 C++17。
+- `CMAKE_CXX_STANDARD_REQUIRED`：是否强制要求这个标准。
+- `ON`：打开。
+- `CMAKE_CXX_EXTENSIONS`：是否允许编译器扩展，例如 GNU 扩展。
+- `OFF`：关闭扩展，尽量使用标准 C++。
+
+```cmake
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+```
+
+逐项解释：
+
+- `find_package`：查找外部包。
+- `Qt6`：包名。
+- `6.5`：最低 Qt 版本。
+- `REQUIRED`：找不到就配置失败。
+- `COMPONENTS`：只查找后面列出的 Qt 模块。
+- `Core`：Qt Core 模块。
+- `Widgets`：Qt Widgets 模块。
+
+成功后，Qt 会提供 imported targets：
+
+```cmake
+Qt::Core
+Qt::Widgets
+```
+
+它们不是字符串装饰，而是真正的 CMake target，里面带有 include 路径、库路径、编译定义等信息。
+
+```cmake
+qt_standard_project_setup(REQUIRES 6.5 SUPPORTS_UP_TO 6.11)
+```
+
+逐项解释：
+
+- `qt_standard_project_setup`：Qt 提供的 CMake helper。
+- `REQUIRES 6.5`：声明项目使用 Qt 6.5 起支持的行为。
+- `SUPPORTS_UP_TO 6.11`：声明项目已经确认支持到 Qt 6.11 的相关 Qt CMake policy。
+
+它通常会启用或设置：
+
+- `CMAKE_AUTOMOC`：自动处理带 `Q_OBJECT` 的头文件。
+- `CMAKE_AUTOUIC`：自动处理 `.ui` 文件。
+- `CMAKE_AUTORCC`：自动处理 `.qrc` 文件。
+- GNUInstallDirs：提供 `${CMAKE_INSTALL_BINDIR}`、`${CMAKE_INSTALL_LIBDIR}` 等安装目录变量。
+
+```cmake
+add_subdirectory(apps/MyApp)
+```
+
+逐项解释：
+
+- `add_subdirectory`：让 CMake 进入子目录继续读取 `CMakeLists.txt`。
+- `apps/MyApp`：相对当前 `CMakeLists.txt` 的子目录路径。
+
+子目录里通常创建真正的 app target。
+
+```cmake
+qt_add_executable(MyApp
+    WIN32 MACOSX_BUNDLE
+    main.cpp
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+)
+```
+
+逐项解释：
+
+- `qt_add_executable`：Qt 对 CMake `add_executable` 的封装。
+- `MyApp`：target 名，也是默认输出程序名。
+- `WIN32`：Windows 下生成 GUI 程序入口，不弹控制台窗口。
+- `MACOSX_BUNDLE`：macOS 下生成 `.app` bundle。
+- `main.cpp`、`mainwindow.cpp`：C++ 源文件。
+- `mainwindow.h`：头文件，放进 target 后 AUTOMOC 能可靠发现 `Q_OBJECT`。
+- `mainwindow.ui`：Qt Designer UI 文件，AUTOUIC 会生成 `ui_mainwindow.h`。
+
+```cmake
+target_link_libraries(MyApp
+    PRIVATE
+        Qt::Core
+        Qt::Widgets
+)
+```
+
+逐项解释：
+
+- `target_link_libraries`：给 target 链接依赖。
+- `MyApp`：要设置的 target。
+- `PRIVATE`：这些依赖只属于 `MyApp` 自己，不向其他 target 传递。
+- `Qt::Core`：Qt Core imported target。
+- `Qt::Widgets`：Qt Widgets imported target。
+
+对于可执行程序，大多数依赖都是 `PRIVATE`。库 target 才更需要认真区分 `PUBLIC` 和 `PRIVATE`。
+
+```cmake
+install(TARGETS MyApp
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+```
+
+逐项解释：
+
+- `install`：声明安装规则。
+- `TARGETS MyApp`：安装 `MyApp` 这个 target。
+- `BUNDLE DESTINATION .`：macOS bundle 安装到安装前缀根目录。
+- `RUNTIME DESTINATION ...`：Windows `.exe` 或 Linux 可执行文件安装目录。
+- `LIBRARY DESTINATION ...`：动态库安装目录。
+- `${CMAKE_INSTALL_BINDIR}`：通常是 `bin`。
+- `${CMAKE_INSTALL_LIBDIR}`：通常是 `lib`。
+
+```cmake
+qt_generate_deploy_app_script(
+    TARGET MyApp
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT ${deploy_script})
+```
+
+逐项解释：
+
+- `qt_generate_deploy_app_script`：生成 Qt 应用部署脚本。
+- `TARGET MyApp`：为哪个 app 生成部署脚本。
+- `OUTPUT_SCRIPT deploy_script`：把生成脚本路径存入变量 `deploy_script`。
+- `NO_UNSUPPORTED_PLATFORM_ERROR`：平台不支持自动部署时不直接报 fatal error。
+- `install(SCRIPT ${deploy_script})`：安装阶段执行这个部署脚本。
+
+Windows 上它会帮助复制 Qt DLL、platform plugin 等运行时依赖。
+
+### 2.11 CMake 的配置阶段和构建阶段
+
+CMake 通常分两步：
+
+```powershell
+cmake -S . -B build
+cmake --build build
+```
+
+第一步是配置和生成：
+
+- 读取 `CMakeLists.txt`。
+- 查找 Qt、编译器和依赖。
+- 生成后端工程文件。
+- 不真正编译 `.cpp`。
+
+第二步才是构建：
+
+- 调用 MSBuild、Ninja 或 Make。
+- 编译 `.cpp`。
+- 运行 MOC/UIC/RCC。
+- 链接 `.exe`、`.lib`、`.dll`。
+
+所以，改了 `CMakeLists.txt` 后需要重新 configure；只改 `.cpp` 通常只需要 build。
+
+### 2.12 现代 CMake 写法和旧写法对比
+
+旧写法：
+
+```cmake
+include_directories(include)
+link_directories(lib)
+add_definitions(-DMY_DEFINE)
+```
+
+问题是这些命令影响范围大，容易污染后续 target。
+
+现代写法：
+
+```cmake
+target_include_directories(MyLib
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_definitions(MyLib
+    PRIVATE
+        MY_DEFINE
+)
+
+target_link_libraries(MyApp
+    PRIVATE
+        MyLib
+)
+```
+
+现代写法的优势：
+
+- 每个属性属于明确的 target。
+- 依赖能自动传递。
+- IDE、安装导出、包管理更容易理解。
+- 大工程不容易互相污染。
+
+这也是本教程反复强调 target 的原因。
+
+## 3. 推荐目录结构
 
 小工程可以平铺，但中大型 Qt 项目最好从一开始就分层：
 
@@ -89,7 +634,7 @@ examples/
 - `tests/` 放测试 target，避免混在 app 目录里。
 - `docs/` 放教程、架构图、发布说明。
 
-## 3. 根 CMakeLists 的职责
+## 4. 根 CMakeLists 的职责
 
 根 `CMakeLists.txt` 不应该塞满源文件。它的职责是设定项目、查找公共依赖、引入子目录：
 
@@ -122,7 +667,7 @@ endif()
 
 真实产品仓库通常可以默认构建主 app，把 examples、tools、tests 设为可选。
 
-## 4. 绝对标准版：单应用也拆分 CMakeLists
+## 5. 绝对标准版：单应用也拆分 CMakeLists
 
 如果只记一套写法，建议记这一套：即使当前项目只有一个 Qt 应用，也保留根 `CMakeLists.txt`，把真正的应用 target 放到子目录。这样以后添加新应用、新库、新插件、新测试工程时，只需要增加目录和 `add_subdirectory()`，不会把根文件越改越乱。
 
@@ -239,7 +784,7 @@ target_link_libraries(MyApp
 
 这就是本文推荐的“绝对标准版”判断标准：根管工程，子目录管 target，target 管依赖。
 
-## 5. 单 Widgets 应用
+## 6. 单 Widgets 应用
 
 见 [examples/01_widgets_basic/CMakeLists.txt](../examples/01_widgets_basic/CMakeLists.txt)。
 
@@ -272,7 +817,7 @@ target_link_libraries(WidgetsBasic
 
 这个示例保留了 Qt Creator 生成工程的紧凑写法，方便和最初的标准模板对应。正式产品更推荐上一节的“根工程 + app 子目录”标准版。
 
-## 6. 多项目：多个 app + 多个 lib
+## 7. 多项目：多个 app + 多个 lib
 
 多项目工程的核心是“库先定义，应用后链接”：
 
@@ -331,7 +876,7 @@ target_link_libraries(DesignerTool
 
 建议为内部库增加命名空间别名，例如 `Study::CoreKit`。这样 CMake 报错会更明确，也能和外部包风格保持一致。
 
-## 7. 多项目下面再嵌子项目
+## 8. 多项目下面再嵌子项目
 
 有些 app 内部还会有插件、工具面板、协议模块、编辑器扩展等。可以继续嵌套：
 
@@ -377,7 +922,7 @@ add_library(Study::ColorPanelPlugin ALIAS ColorPanelPlugin)
 
 如果只是两个 `.cpp`，不要过度拆 target。先用 `target_sources()` 加到 app 里即可。
 
-## 8. 什么时候用 target_sources
+## 9. 什么时候用 target_sources
 
 当 target 已经在父目录创建，但源文件分散在子目录时，可以用 `target_sources()`：
 
@@ -401,7 +946,7 @@ target_sources(DesignerTool
 - 子模块有独立依赖或测试。
 - 子模块需要安装、导出或插件化。
 
-## 9. QML/Qt Quick 工程
+## 10. QML/Qt Quick 工程
 
 见 [examples/03_qml_app/CMakeLists.txt](../examples/03_qml_app/CMakeLists.txt)。
 
@@ -441,7 +986,7 @@ qt_generate_deploy_qml_app_script(
 install(SCRIPT ${deploy_script})
 ```
 
-## 10. 资源、图标、翻译
+## 11. 资源、图标、翻译
 
 Qt 6 可以直接在 target 中加入 `.qrc`：
 
@@ -475,7 +1020,7 @@ qt_standard_project_setup(
 
 如果是多个 app，共享翻译和每个 app 的翻译要分开命名，避免生成文件互相覆盖。
 
-## 11. 安装与部署
+## 12. 安装与部署
 
 Qt 应用不能只复制 `.exe`。Windows 还需要 Qt DLL、platform plugins、imageformats、styles、QML imports 等。标准 Widgets 应用可用：
 
@@ -502,7 +1047,7 @@ cmake --install build --prefix package
 
 多 app 时可以为每个 app 生成部署脚本，或在顶层集中处理。简单项目按 app 各自写，复杂产品再抽函数。
 
-## 12. VS Code 配置
+## 13. VS Code 配置
 
 推荐安装：
 
@@ -554,7 +1099,7 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2019_64
 }
 ```
 
-## 13. Qt Creator 配置
+## 14. Qt Creator 配置
 
 Qt Creator 对 Qt CMake 支持很完整。建议：
 
@@ -566,7 +1111,7 @@ Qt Creator 对 Qt CMake 支持很完整。建议：
 
 Qt Creator 生成的 `CMakeLists.txt.user` 是本机配置，不应提交。
 
-## 14. 常见工程模式
+## 15. 常见工程模式
 
 ### 单 app
 
@@ -621,7 +1166,7 @@ tests/
 
 适合 SDK、框架、组件库。注意默认构建项要克制，避免读者或 CI 被大量示例拖慢。
 
-## 15. 常见坑位
+## 16. 常见坑位
 
 - `Q_OBJECT` 相关链接错误：确认启用了 AUTOMOC，头文件在 target 源文件列表中。
 - `.ui` 找不到 `ui_xxx.h`：确认启用了 AUTOUIC，`.ui` 在 target 源文件列表中。
@@ -633,7 +1178,7 @@ tests/
 - QML import 运行时失败：使用 `qt_add_qml_module()`，部署时使用 QML 部署脚本。
 - 子目录变量互相影响：少依赖普通变量跨目录传递，优先让 target 传递属性。
 
-## 16. 可复用模板
+## 17. 可复用模板
 
 ### 静态库模板
 
@@ -753,7 +1298,7 @@ target_link_libraries(MyApp
 )
 ```
 
-## 17. 发布到 GitHub 的建议
+## 18. 发布到 GitHub 的建议
 
 提交内容建议包含：
 
@@ -766,13 +1311,14 @@ target_link_libraries(MyApp
 
 README 不要只写概念，最好给可复制命令。教程中每个复杂结构都配一个小示例，读者更容易迁移到自己的项目。
 
-## 18. 参考资料
+## 19. 参考资料
 
 - Qt 官方文档：[Build with CMake](https://doc.qt.io/qt-6.11/cmake-manual.html)
 - Qt 官方文档：[qt_standard_project_setup](https://doc.qt.io/qt-6/qt-standard-project-setup.html)
 - Qt 官方文档：[qt_add_library](https://doc.qt.io/qt-6/qt-add-library.html)
 - Qt 官方文档：[qt_add_qml_module](https://doc.qt.io/qt-6/qt-add-qml-module.html)
 - Qt 官方文档：[qt_generate_deploy_app_script](https://doc.qt.io/qt-6/qt-generate-deploy-app-script.html)
+- CMake 官方文档：[cmake-language](https://cmake.org/cmake/help/latest/manual/cmake-language.7.html)
 - CMake 官方文档：[CMake Presets](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html)
 - CMake 官方文档：[install](https://cmake.org/cmake/help/latest/command/install.html)
 - CMake 官方文档：[Importing and Exporting Guide](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html)
