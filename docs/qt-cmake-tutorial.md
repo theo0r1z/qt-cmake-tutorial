@@ -1,10 +1,58 @@
-# Qt CMake 综合教程：从单窗口到多项目工程
+# Qt CMake 综合课程：从 0 基础到专业工程实践
 
-本文面向已经会写一点 Qt/C++，但想把 CMake 工程组织做扎实的开发者。目标不是背命令，而是建立一套可落地的工程模板：小项目能快，大项目能拆，多个应用、多个库、嵌套子项目、QML、资源、安装部署都能自然扩展。
+本文是一套面向 Qt 6 开发的 CMake 系统课程。它不只告诉你“复制这段 CMakeLists”，而是从 0 基础开始解释每个命令、每个参数、每种目录组织方式背后的原因，最后落到能长期维护的大型 Qt 工程结构。
+
+课程目标是让读者完成这条成长路径：
+
+```text
+能运行 Qt 工程
+  -> 看懂 CMake 语法
+  -> 会写标准单应用结构
+  -> 会拆 app/lib/plugin/test
+  -> 会管理依赖、资源、QML、安装部署
+  -> 会使用行业公认的现代 CMake 工程化做法
+```
+
+“15 年经验”不是靠读一篇文档自动获得的，但这套课程会把很多资深工程师踩过的坑、形成的约定、以及大型项目里稳定有效的写法提前讲清楚。你照这个标准开项目，将来从单窗口工具扩展到多应用、多库、多插件的产品线，也不需要重写工程骨架。
 
 ![VS Code 中的 Qt CMake 工程](assets/screenshots/vscode-overview.png)
 
-## 1. 从标准 Qt CMakeLists 开始
+## 0. 学习路线：从小白到能维护大型工程
+
+建议按这个顺序学习，不要一开始就跳到多项目和部署：
+
+```text
+第 1 阶段：跑起来
+  1. 看完整标准 Qt CMakeLists
+  2. 学会 cmake -S . -B build
+  3. 学会 cmake --build build
+
+第 2 阶段：看懂
+  4. 理解 CMake 命令、变量、列表、if、作用域
+  5. 理解 target 是现代 CMake 的核心
+  6. 理解 PUBLIC / PRIVATE / INTERFACE
+
+第 3 阶段：写标准工程
+  7. 单应用也拆成根 CMakeLists + apps/MyApp/CMakeLists
+  8. app 只负责 executable，lib 只负责 library
+  9. 所有依赖通过 target_link_libraries 表达
+
+第 4 阶段：扩展工程
+  10. 增加公共库
+  11. 增加第二个应用
+  12. 增加 app 内部嵌套子项目或插件
+  13. 增加 QML、资源、翻译、测试
+
+第 5 阶段：专业化
+  14. 使用 CMakePresets
+  15. 使用 install/deploy
+  16. 接入第三方依赖和 CI
+  17. 建立团队统一 CMake 规范
+```
+
+本文后面的章节就是按这条路径组织的。前半部分适合 0 基础读者，后半部分适合正在维护真实项目的开发者反复查阅。
+
+## 1. 第一眼看懂标准 Qt CMakeLists
 
 Qt Creator 创建 Widgets 工程时常见的标准写法大致如下：
 
@@ -1178,7 +1226,543 @@ tests/
 - QML import 运行时失败：使用 `qt_add_qml_module()`，部署时使用 QML 部署脚本。
 - 子目录变量互相影响：少依赖普通变量跨目录传递，优先让 target 传递属性。
 
-## 17. 可复用模板
+## 17. 实战技巧与标杆做法
+
+这一章是扩展内容，来自现代 CMake、Qt 官方 CMake 推荐方式、以及大型 C++/Qt 项目长期维护中反复验证过的做法。初学者第一次读可以先记结论，等项目变大后再回来细看。
+
+### 17.1 永远区分源码目录和构建目录
+
+标杆做法：源码目录只放源码，构建目录只放生成物。
+
+推荐：
+
+```powershell
+cmake -S . -B out/build/debug
+cmake --build out/build/debug
+```
+
+不推荐：
+
+```powershell
+cmake .
+```
+
+原因：
+
+- 构建产物不会污染源码目录。
+- Debug、Release、不同 Qt Kit 可以并存。
+- 删除构建目录即可重新配置，不会误删源码。
+- CI 和本地开发命令一致。
+
+建议 `.gitignore` 至少包含：
+
+```gitignore
+out/
+build*/
+CMakeUserPresets.json
+*.user
+```
+
+### 17.2 用 CMakePresets 固化团队入口
+
+标杆做法：提交 `CMakePresets.json`，不提交 `CMakeUserPresets.json`。
+
+`CMakePresets.json` 放团队共享配置：
+
+```json
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "dev-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/dev-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ]
+}
+```
+
+本机 Qt 路径、个人编译器路径放 `CMakeUserPresets.json`：
+
+```json
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "my-qt-debug",
+      "inherits": "dev-debug",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "C:/Qt/6.7.3/msvc2019_64"
+      }
+    }
+  ]
+}
+```
+
+这样团队成员使用同一套 preset 名称，但每个人可以有自己的 Qt 安装路径。
+
+### 17.3 target 命名要稳定
+
+标杆做法：
+
+```cmake
+qt_add_library(CoreKit STATIC ...)
+add_library(Project::CoreKit ALIAS CoreKit)
+```
+
+应用链接 alias：
+
+```cmake
+target_link_libraries(MyApp
+    PRIVATE
+        Project::CoreKit
+)
+```
+
+好处：
+
+- `Project::CoreKit` 一看就是 CMake target，不会被误认为系统库名。
+- 将来 `CoreKit` 从静态库变动态库，消费者不用改。
+- 将来库迁到外部包，也能保持相似的链接写法。
+- CMake 报错更清晰。
+
+不要随意重命名 target。target 名是工程 API，改名会影响 IDE、脚本、安装导出、CI 和其他子项目。
+
+### 17.4 不要全局污染 include、link、define
+
+旧写法：
+
+```cmake
+include_directories(include)
+add_definitions(-DUNICODE)
+link_directories(lib)
+```
+
+标杆写法：
+
+```cmake
+target_include_directories(CoreKit
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_definitions(CoreKit
+    PRIVATE
+        COREKIT_BUILDING
+)
+
+target_link_libraries(MyApp
+    PRIVATE
+        Project::CoreKit
+)
+```
+
+全局命令的最大问题是影响范围太大。项目小的时候看不出，项目一大就会出现“某个子目录莫名其妙拿到了不该有的 include 路径或宏定义”的问题。
+
+### 17.5 源文件显式列出，少用 file(GLOB)
+
+很多初学者喜欢：
+
+```cmake
+file(GLOB APP_SOURCES *.cpp *.h)
+```
+
+更推荐：
+
+```cmake
+qt_add_executable(MyApp
+    main.cpp
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+)
+```
+
+原因：
+
+- 新增或删除源文件时，Git diff 能明确看到 CMakeLists 的变化。
+- IDE 展示更稳定。
+- 某些生成器对文件新增的自动重新配置并不总是符合预期。
+
+如果确实是资源目录、插件扫描、示例批量收集，可以使用：
+
+```cmake
+file(GLOB CONFIGURE_DEPENDS QML_FILES qml/*.qml)
+```
+
+但核心源码仍建议显式列出。
+
+### 17.6 用 target_compile_features 表达语言标准
+
+根工程里写：
+
+```cmake
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+```
+
+适合统一项目默认标准。
+
+库对外暴露 C++ 标准要求时，可以更精确：
+
+```cmake
+target_compile_features(CoreKit
+    PUBLIC
+        cxx_std_17
+)
+```
+
+如果公开头文件使用了 C++17 特性，应该是 `PUBLIC`；如果只有 `.cpp` 内部使用，通常是 `PRIVATE`。
+
+### 17.7 区分 Project、Target、Module、Package
+
+这四个词经常被混用，但最好分清：
+
+- Project：一次 CMake 配置的顶层工程，例如 `StudyCMake`。
+- Target：CMake 里可构建或可链接的对象，例如 `MyApp`、`CoreKit`。
+- Module：Qt 模块或 CMake 模块，例如 `Qt::Widgets`、`FindXxx.cmake`。
+- Package：`find_package()` 能找到的包，例如 `Qt6`、`OpenSSL`、`fmt`。
+
+很多 CMake 混乱来自把 project 当 target，或者把 package 名当库名。记住：真正链接时应该链接 target。
+
+### 17.8 第三方依赖优先使用 imported target
+
+推荐：
+
+```cmake
+find_package(OpenSSL REQUIRED)
+
+target_link_libraries(NetworkKit
+    PRIVATE
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
+```
+
+不推荐：
+
+```cmake
+target_include_directories(NetworkKit PRIVATE C:/OpenSSL/include)
+target_link_libraries(NetworkKit PRIVATE C:/OpenSSL/lib/libssl.lib)
+```
+
+如果使用 vcpkg、Conan、系统包或 Qt 自带包，只要它们提供 imported target，就优先链接 imported target。这样 include 路径、库路径、编译定义、平台差异都由包自己处理。
+
+### 17.9 add_subdirectory、FetchContent、find_package 怎么选
+
+常见选择：
+
+```text
+项目内部模块        -> add_subdirectory()
+第三方源码随项目构建 -> FetchContent 或 git submodule + add_subdirectory()
+系统/包管理器依赖    -> find_package()
+```
+
+内部库：
+
+```cmake
+add_subdirectory(libs/CoreKit)
+```
+
+外部已安装包：
+
+```cmake
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+```
+
+FetchContent 示例：
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 10.2.1
+)
+
+FetchContent_MakeAvailable(fmt)
+
+target_link_libraries(MyApp
+    PRIVATE
+        fmt::fmt
+)
+```
+
+建议：团队产品优先用包管理器或锁定版本的依赖方式，不要让每次 configure 都下载不确定版本。
+
+### 17.10 使用 interface target 统一项目警告和选项
+
+大型项目常用一个 `INTERFACE` target 承载通用编译选项：
+
+```cmake
+add_library(ProjectWarnings INTERFACE)
+
+target_compile_options(ProjectWarnings
+    INTERFACE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
+)
+```
+
+使用：
+
+```cmake
+target_link_libraries(CoreKit
+    PRIVATE
+        ProjectWarnings
+)
+```
+
+这里出现了 generator expression：
+
+```cmake
+$<$<CXX_COMPILER_ID:MSVC>:/W4>
+```
+
+意思是：如果当前 C++ 编译器是 MSVC，就添加 `/W4`。它比手写很多 `if(MSVC)` 更适合挂在 target 属性里。
+
+初学者可以先不写 generator expression，但要知道大型跨平台项目经常用它处理编译器、平台、Debug/Release 差异。
+
+### 17.11 用函数消除重复，但不要过早封装
+
+多 app 都需要安装和部署时，可以封装函数：
+
+```cmake
+function(project_install_qt_app target_name)
+    install(TARGETS ${target_name}
+        BUNDLE  DESTINATION .
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+
+    qt_generate_deploy_app_script(
+        TARGET ${target_name}
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT ${deploy_script})
+endfunction()
+```
+
+使用：
+
+```cmake
+project_install_qt_app(MyApp)
+```
+
+但不要一开始就把所有东西都封装成函数。CMake 的可读性很重要。重复两次可以接受，重复三到五次且规则稳定时再抽函数。
+
+### 17.12 输出目录要谨慎设置
+
+有些项目会统一 exe/lib 输出目录：
+
+```cmake
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+```
+
+这能让运行路径更集中，但也可能带来 Debug/Release 混放问题。Visual Studio 这种多配置生成器尤其要注意配置名：
+
+```cmake
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release)
+```
+
+建议初学者先使用 CMake 默认输出目录。等部署、运行调试有明确需求后再统一设置。
+
+### 17.13 Qt 项目不要手动调用 moc/uic/rcc
+
+现代 Qt CMake 推荐让 CMake 自动处理：
+
+```cmake
+qt_standard_project_setup(REQUIRES 6.5 SUPPORTS_UP_TO 6.11)
+```
+
+然后把文件放进 target：
+
+```cmake
+qt_add_executable(MyApp
+    mainwindow.h
+    mainwindow.cpp
+    mainwindow.ui
+    assets.qrc
+)
+```
+
+不要手写：
+
+```cmake
+qt_wrap_cpp(...)
+qt_wrap_ui(...)
+qt_add_resources(...)
+```
+
+除非你在维护很老的 Qt/CMake 工程，或者有明确的特殊生成需求。
+
+### 17.14 QML 模块要从第一天就规范 URI
+
+推荐：
+
+```cmake
+qt_add_qml_module(MyApp
+    URI Company.Product.App
+    VERSION 1.0
+    QML_FILES
+        Main.qml
+        controls/PrimaryButton.qml
+)
+```
+
+建议：
+
+- URI 不要用临时名字，例如 `Test`、`Demo`、`Untitled`。
+- 公共控件单独模块化，例如 `Company.Product.Controls`。
+- app 页面和公共控件分开。
+- QML 文件加入 `qt_add_qml_module()`，不要只靠运行时相对路径加载。
+
+这样部署、QML cache、类型注册、import 检查都会更稳。
+
+### 17.15 install 规则要早写，不要发布前才补
+
+很多项目开发期只会 build，发布前才发现安装结构混乱。建议 app 创建时就写最小安装规则：
+
+```cmake
+install(TARGETS MyApp
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+```
+
+然后用：
+
+```powershell
+cmake --install build --prefix package
+```
+
+验证安装结果。长期看，`install()` 是工程质量的一部分，不是发布脚本的附属品。
+
+### 17.16 测试工程从一开始预留
+
+根目录：
+
+```cmake
+include(CTest)
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+```
+
+测试 target：
+
+```cmake
+qt_add_executable(CoreKitTests
+    tst_projectinfo.cpp
+)
+
+target_link_libraries(CoreKitTests
+    PRIVATE
+        Qt::Test
+        Project::CoreKit
+)
+
+add_test(NAME CoreKitTests COMMAND CoreKitTests)
+```
+
+命令：
+
+```powershell
+ctest --test-dir build --output-on-failure
+```
+
+测试不一定一开始很多，但结构要早有。等工程变大后再补测试入口，会比补测试本身还痛。
+
+### 17.17 用 message 和 trace 调试 CMake
+
+最常用：
+
+```cmake
+message(STATUS "Qt version: ${Qt6_VERSION}")
+message(STATUS "Current source dir: ${CMAKE_CURRENT_SOURCE_DIR}")
+```
+
+排查变量：
+
+```powershell
+cmake -S . -B build -LAH
+```
+
+查看执行轨迹：
+
+```powershell
+cmake -S . -B build --trace-expand
+```
+
+`--trace-expand` 输出会很长，只在排查疑难问题时使用。
+
+### 17.18 常用变量要分清
+
+```text
+CMAKE_SOURCE_DIR          顶层源码目录
+CMAKE_BINARY_DIR          顶层构建目录
+CMAKE_CURRENT_SOURCE_DIR  当前 CMakeLists 所在源码目录
+CMAKE_CURRENT_BINARY_DIR  当前 CMakeLists 对应构建目录
+PROJECT_SOURCE_DIR        当前 project() 的源码目录
+PROJECT_BINARY_DIR        当前 project() 的构建目录
+```
+
+在子目录中写 include 路径时，最常用：
+
+```cmake
+${CMAKE_CURRENT_SOURCE_DIR}
+```
+
+不要在库子目录里滥用 `${CMAKE_SOURCE_DIR}`，否则这个库将来被别的工程 `add_subdirectory()` 引入时容易失效。
+
+### 17.19 跨平台条件要集中、克制
+
+可以这样写：
+
+```cmake
+if(WIN32)
+    target_compile_definitions(MyApp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+```
+
+但不要到处散落平台判断。建议：
+
+- app 特有的平台差异放 app 目录。
+- 库内部平台差异放库目录。
+- 全项目通用平台选项放 interface target 或根目录函数。
+- 能用 Qt API 跨平台解决的，不要先写系统 API。
+
+### 17.20 形成团队 CMake 规范
+
+成熟团队通常会把这些规则写进仓库文档：
+
+```text
+1. 根 CMakeLists 不直接添加业务源文件。
+2. 每个 app/lib/plugin/test 独立 target。
+3. 所有依赖必须通过 target_link_libraries 表达。
+4. 禁止新增全局 include_directories/link_directories。
+5. 新增公开头文件时检查 PUBLIC/PRIVATE 是否正确。
+6. CMakePresets.json 可提交，CMakeUserPresets.json 不提交。
+7. 构建目录必须在 out/ 或 build*/ 下。
+8. 新增 Qt UI/QML/resource 文件必须加入对应 target。
+9. 发布前必须跑 cmake --install。
+10. CI 至少验证 configure + build。
+```
+
+这些规则看起来朴素，但它们能避免 80% 以上的 CMake 工程腐化。
+
+## 18. 可复用模板
 
 ### 静态库模板
 
@@ -1298,7 +1882,46 @@ target_link_libraries(MyApp
 )
 ```
 
-## 18. 发布到 GitHub 的建议
+## 19. 学完后的专业能力清单
+
+如果你能独立完成下面这些事，就说明你已经不只是“会改 CMakeLists”，而是具备了维护 Qt/CMake 工程的专业能力：
+
+```text
+基础能力
+  [ ] 能解释 cmake -S、-B、--build、--install 的区别
+  [ ] 能逐句解释 cmake_minimum_required、project、find_package
+  [ ] 能解释变量、列表、if、option、作用域
+  [ ] 能解释 configure 阶段和 build 阶段的区别
+
+target 能力
+  [ ] 能创建 executable、static library、shared library、interface target
+  [ ] 能正确使用 PUBLIC / PRIVATE / INTERFACE
+  [ ] 能判断公开头文件里的依赖是否应该 PUBLIC
+  [ ] 能避免 include_directories、link_directories 这类全局污染
+
+Qt 能力
+  [ ] 能写标准 Qt Widgets 工程
+  [ ] 能解释 AUTOMOC / AUTOUIC / AUTORCC 的作用
+  [ ] 能写 QML 工程并使用 qt_add_qml_module
+  [ ] 能处理资源、翻译、安装和部署
+
+工程能力
+  [ ] 能从单 app 扩展到多 app + 多 lib
+  [ ] 能设计根 CMakeLists + 子项目 CMakeLists 的目录结构
+  [ ] 能接入 CMakePresets
+  [ ] 能使用 install、CTest、第三方 imported target
+  [ ] 能给团队制定 CMake 规范
+
+排错能力
+  [ ] 能定位 Qt6Config.cmake 找不到的问题
+  [ ] 能定位 Q_OBJECT/moc/uic/rcc 相关问题
+  [ ] 能用 message、-LAH、--trace-expand 排查 CMake 配置问题
+  [ ] 能判断问题发生在 CMake 配置、编译、链接、运行时还是部署阶段
+```
+
+真正的资深经验来自大量项目实践，但这份清单覆盖了 Qt/CMake 工程中最核心、最常出问题、也最能体现工程质量的能力。后续遇到新场景时，优先回到三个原则：根管工程，子目录管 target，target 管依赖。
+
+## 20. 发布到 GitHub 的建议
 
 提交内容建议包含：
 
@@ -1311,14 +1934,18 @@ target_link_libraries(MyApp
 
 README 不要只写概念，最好给可复制命令。教程中每个复杂结构都配一个小示例，读者更容易迁移到自己的项目。
 
-## 19. 参考资料
+## 21. 参考资料
 
 - Qt 官方文档：[Build with CMake](https://doc.qt.io/qt-6.11/cmake-manual.html)
+- Qt 官方文档：[Getting started with CMake](https://doc.qt.io/qt-6/cmake-get-started.html)
 - Qt 官方文档：[qt_standard_project_setup](https://doc.qt.io/qt-6/qt-standard-project-setup.html)
 - Qt 官方文档：[qt_add_library](https://doc.qt.io/qt-6/qt-add-library.html)
 - Qt 官方文档：[qt_add_qml_module](https://doc.qt.io/qt-6/qt-add-qml-module.html)
 - Qt 官方文档：[qt_generate_deploy_app_script](https://doc.qt.io/qt-6/qt-generate-deploy-app-script.html)
 - CMake 官方文档：[cmake-language](https://cmake.org/cmake/help/latest/manual/cmake-language.7.html)
+- CMake 官方文档：[CMake Tutorial](https://cmake.org/cmake/help/latest/guide/tutorial/index.html)
+- CMake 官方文档：[target_link_libraries](https://cmake.org/cmake/help/latest/command/target_link_libraries.html)
 - CMake 官方文档：[CMake Presets](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html)
 - CMake 官方文档：[install](https://cmake.org/cmake/help/latest/command/install.html)
 - CMake 官方文档：[Importing and Exporting Guide](https://cmake.org/cmake/help/latest/guide/importing-exporting/index.html)
+- Modern CMake：[Introduction to the basics](https://cliutils.gitlab.io/modern-cmake/chapters/basics.html)
