@@ -3,6 +3,7 @@
 这是一套面向 Qt 6 开发的 CMake 教程与示例仓库，基于 Qt Creator/Qt 生成的标准 `CMakeLists.txt` 写法，扩展到真实工程常见的组织方式：
 
 - 单个 Widgets 应用
+- 单应用也保留根 `CMakeLists.txt`，应用 target 放到子目录，方便未来无痛扩展
 - 一个仓库包含多个应用和多个库
 - 多项目下面继续嵌套子项目、插件或功能模块
 - QML/Qt Quick 模块
@@ -43,6 +44,24 @@ examples/
   02_multi_project/        # 一个仓库多个 app/lib，并包含嵌套子项目
   03_qml_app/              # Qt Quick/QML 应用与 QML 模块
 ```
+
+## 推荐标准
+
+即使当前只有一个 Qt 应用，也推荐使用“根工程 + 子项目”的标准结构：
+
+```text
+MyQtProject/
+  CMakeLists.txt
+  apps/
+    MyApp/
+      CMakeLists.txt
+      main.cpp
+      mainwindow.h
+      mainwindow.cpp
+      mainwindow.ui
+```
+
+根 `CMakeLists.txt` 只负责项目级配置和 `add_subdirectory()`，应用自己的 `CMakeLists.txt` 只负责创建和链接自己的 target。这样以后添加第二个应用、公共库、插件、测试工程时，不需要重写已有结构。
 
 ## 参考来源
 

@@ -122,7 +122,124 @@ endif()
 
 真实产品仓库通常可以默认构建主 app，把 examples、tools、tests 设为可选。
 
-## 4. 单 Widgets 应用
+## 4. 绝对标准版：单应用也拆分 CMakeLists
+
+如果只记一套写法，建议记这一套：即使当前项目只有一个 Qt 应用，也保留根 `CMakeLists.txt`，把真正的应用 target 放到子目录。这样以后添加新应用、新库、新插件、新测试工程时，只需要增加目录和 `add_subdirectory()`，不会把根文件越改越乱。
+
+标准目录：
+
+```text
+MyQtProject/
+  CMakeLists.txt
+  CMakePresets.json
+  apps/
+    MyApp/
+      CMakeLists.txt
+      main.cpp
+      mainwindow.h
+      mainwindow.cpp
+      mainwindow.ui
+  libs/
+  plugins/
+  tests/
+  resources/
+```
+
+哪怕 `libs/`、`plugins/`、`tests/` 暂时为空，也可以先不创建目录；关键是根工程只做项目级配置，具体 target 永远下沉到子目录。
+
+根 `CMakeLists.txt` 标准版：
+
+```cmake
+cmake_minimum_required(VERSION 3.19)
+
+project(MyQtProject
+    VERSION 1.0.0
+    DESCRIPTION "My Qt application"
+    LANGUAGES CXX
+)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+qt_standard_project_setup(REQUIRES 6.5 SUPPORTS_UP_TO 6.11)
+
+add_subdirectory(apps/MyApp)
+```
+
+`apps/MyApp/CMakeLists.txt` 标准版：
+
+```cmake
+qt_add_executable(MyApp
+    WIN32 MACOSX_BUNDLE
+    main.cpp
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+)
+
+target_link_libraries(MyApp
+    PRIVATE
+        Qt::Core
+        Qt::Widgets
+)
+
+install(TARGETS MyApp
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+qt_generate_deploy_app_script(
+    TARGET MyApp
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT ${deploy_script})
+```
+
+这套写法的边界非常清楚：
+
+- 根 `CMakeLists.txt`：项目名、版本、C++ 标准、公共 Qt setup、全局开关、引入子目录。
+- app 子目录：只定义这个应用自己的源文件、依赖、安装和部署。
+- lib 子目录：只定义库 target、公开头文件目录、库依赖和 alias。
+- plugin/feature 子目录：只定义插件式模块或功能模块。
+- tests 子目录：只定义测试 target，不污染应用 target。
+
+将来从单应用扩展成多应用时，只需要这样改根文件：
+
+```cmake
+add_subdirectory(apps/MyApp)
+add_subdirectory(apps/AdminTool)
+add_subdirectory(libs/CoreKit)
+```
+
+然后让应用按需链接库：
+
+```cmake
+target_link_libraries(MyApp
+    PRIVATE
+        Qt::Widgets
+        Project::CoreKit
+)
+```
+
+也就是说，标准版不是为了当前多写几行，而是为了保证项目从第一天起就能自然长大。
+
+执行时建议遵守这几条硬规则：
+
+- 根目录必须长期保留 `CMakeLists.txt`，不要让唯一 app 的 `CMakeLists.txt` 变成事实根工程。
+- 根目录不直接写 `main.cpp`、`mainwindow.cpp` 这类业务源文件。
+- 每个可执行程序一个目录、一个 target、一个 `CMakeLists.txt`。
+- 每个可复用库一个目录、一个 target、一个 `CMakeLists.txt`，并提供 `Project::Name` alias。
+- app 只能链接库 target，不直接偷 include 其他模块的 `src/` 目录。
+- 目录之间少传普通变量，依赖关系通过 `target_link_libraries()`、`target_include_directories()` 的 `PUBLIC/PRIVATE/INTERFACE` 表达。
+- 新增功能时先判断它是 app 内部源码、可复用库、插件式模块还是测试，再决定用 `target_sources()`、`qt_add_library()` 或 `qt_add_executable()`。
+
+这就是本文推荐的“绝对标准版”判断标准：根管工程，子目录管 target，target 管依赖。
+
+## 5. 单 Widgets 应用
 
 见 [examples/01_widgets_basic/CMakeLists.txt](../examples/01_widgets_basic/CMakeLists.txt)。
 
@@ -153,7 +270,9 @@ target_link_libraries(WidgetsBasic
 - `.qrc`：需要 RCC 打包资源。
 - `.cpp`：正常 C++ 编译单元。
 
-## 5. 多项目：多个 app + 多个 lib
+这个示例保留了 Qt Creator 生成工程的紧凑写法，方便和最初的标准模板对应。正式产品更推荐上一节的“根工程 + app 子目录”标准版。
+
+## 6. 多项目：多个 app + 多个 lib
 
 多项目工程的核心是“库先定义，应用后链接”：
 
@@ -212,7 +331,7 @@ target_link_libraries(DesignerTool
 
 建议为内部库增加命名空间别名，例如 `Study::CoreKit`。这样 CMake 报错会更明确，也能和外部包风格保持一致。
 
-## 6. 多项目下面再嵌子项目
+## 7. 多项目下面再嵌子项目
 
 有些 app 内部还会有插件、工具面板、协议模块、编辑器扩展等。可以继续嵌套：
 
@@ -258,7 +377,7 @@ add_library(Study::ColorPanelPlugin ALIAS ColorPanelPlugin)
 
 如果只是两个 `.cpp`，不要过度拆 target。先用 `target_sources()` 加到 app 里即可。
 
-## 7. 什么时候用 target_sources
+## 8. 什么时候用 target_sources
 
 当 target 已经在父目录创建，但源文件分散在子目录时，可以用 `target_sources()`：
 
@@ -282,7 +401,7 @@ target_sources(DesignerTool
 - 子模块有独立依赖或测试。
 - 子模块需要安装、导出或插件化。
 
-## 8. QML/Qt Quick 工程
+## 9. QML/Qt Quick 工程
 
 见 [examples/03_qml_app/CMakeLists.txt](../examples/03_qml_app/CMakeLists.txt)。
 
@@ -322,7 +441,7 @@ qt_generate_deploy_qml_app_script(
 install(SCRIPT ${deploy_script})
 ```
 
-## 9. 资源、图标、翻译
+## 10. 资源、图标、翻译
 
 Qt 6 可以直接在 target 中加入 `.qrc`：
 
@@ -356,7 +475,7 @@ qt_standard_project_setup(
 
 如果是多个 app，共享翻译和每个 app 的翻译要分开命名，避免生成文件互相覆盖。
 
-## 10. 安装与部署
+## 11. 安装与部署
 
 Qt 应用不能只复制 `.exe`。Windows 还需要 Qt DLL、platform plugins、imageformats、styles、QML imports 等。标准 Widgets 应用可用：
 
@@ -383,7 +502,7 @@ cmake --install build --prefix package
 
 多 app 时可以为每个 app 生成部署脚本，或在顶层集中处理。简单项目按 app 各自写，复杂产品再抽函数。
 
-## 11. VS Code 配置
+## 12. VS Code 配置
 
 推荐安装：
 
@@ -435,7 +554,7 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2019_64
 }
 ```
 
-## 12. Qt Creator 配置
+## 13. Qt Creator 配置
 
 Qt Creator 对 Qt CMake 支持很完整。建议：
 
@@ -447,7 +566,7 @@ Qt Creator 对 Qt CMake 支持很完整。建议：
 
 Qt Creator 生成的 `CMakeLists.txt.user` 是本机配置，不应提交。
 
-## 13. 常见工程模式
+## 14. 常见工程模式
 
 ### 单 app
 
@@ -502,7 +621,7 @@ tests/
 
 适合 SDK、框架、组件库。注意默认构建项要克制，避免读者或 CI 被大量示例拖慢。
 
-## 14. 常见坑位
+## 15. 常见坑位
 
 - `Q_OBJECT` 相关链接错误：确认启用了 AUTOMOC，头文件在 target 源文件列表中。
 - `.ui` 找不到 `ui_xxx.h`：确认启用了 AUTOUIC，`.ui` 在 target 源文件列表中。
@@ -514,7 +633,7 @@ tests/
 - QML import 运行时失败：使用 `qt_add_qml_module()`，部署时使用 QML 部署脚本。
 - 子目录变量互相影响：少依赖普通变量跨目录传递，优先让 target 传递属性。
 
-## 15. 可复用模板
+## 16. 可复用模板
 
 ### 静态库模板
 
@@ -580,7 +699,61 @@ if(BUILD_TOOLS)
 endif()
 ```
 
-## 16. 发布到 GitHub 的建议
+### 绝对标准单应用模板
+
+目录：
+
+```text
+MyQtProject/
+  CMakeLists.txt
+  apps/
+    MyApp/
+      CMakeLists.txt
+      main.cpp
+      mainwindow.cpp
+      mainwindow.h
+      mainwindow.ui
+```
+
+根 `CMakeLists.txt`：
+
+```cmake
+cmake_minimum_required(VERSION 3.19)
+
+project(MyQtProject
+    VERSION 1.0.0
+    LANGUAGES CXX
+)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+qt_standard_project_setup(REQUIRES 6.5 SUPPORTS_UP_TO 6.11)
+
+add_subdirectory(apps/MyApp)
+```
+
+`apps/MyApp/CMakeLists.txt`：
+
+```cmake
+qt_add_executable(MyApp
+    WIN32 MACOSX_BUNDLE
+    main.cpp
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+)
+
+target_link_libraries(MyApp
+    PRIVATE
+        Qt::Core
+        Qt::Widgets
+)
+```
+
+## 17. 发布到 GitHub 的建议
 
 提交内容建议包含：
 
@@ -593,7 +766,7 @@ endif()
 
 README 不要只写概念，最好给可复制命令。教程中每个复杂结构都配一个小示例，读者更容易迁移到自己的项目。
 
-## 17. 参考资料
+## 18. 参考资料
 
 - Qt 官方文档：[Build with CMake](https://doc.qt.io/qt-6.11/cmake-manual.html)
 - Qt 官方文档：[qt_standard_project_setup](https://doc.qt.io/qt-6/qt-standard-project-setup.html)
