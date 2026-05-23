@@ -1,21 +1,21 @@
 # Qt CMake 综合课程
 
-这是一套面向 Qt 6 开发的 CMake 系统课程与示例仓库，基于 Qt Creator/Qt 生成的标准 `CMakeLists.txt` 写法，扩展到真实工程常见的组织方式：
+这是一套专注 Qt 6 + CMake 开发的系统课程与示例仓库，基于 Qt Creator/Qt 生成的标准 `CMakeLists.txt` 写法，扩展到真实 Qt 工程常见的组织方式：
 
 - 单个 Widgets 应用
-- CMake 基础语法、变量、列表、条件、作用域、target 依赖逐项拆解
+- Qt 项目必须掌握的 CMake 语法、作用域、target 依赖逐项拆解
 - 单应用也保留根 `CMakeLists.txt`，应用 target 放到子目录，方便未来无痛扩展
 - 一个仓库包含多个应用和多个库
 - 多项目下面继续嵌套子项目、插件或功能模块
 - QML/Qt Quick 模块
 - 资源、翻译、安装、部署、VS Code、Qt Creator、CMake Presets、CI 思路
-- 常用实战技巧与现代 CMake 标杆做法
+- Qt 项目常用实战技巧与现代 CMake 标杆做法
 
 教程正文：[docs/qt-cmake-tutorial.md](docs/qt-cmake-tutorial.md)
 
 ## 学习目标
 
-这套课程按“从 0 基础到能维护大型 Qt 工程”的路径组织：先跑通、再看懂语法、再掌握标准工程骨架，最后学习多项目、部署、测试、第三方依赖和团队规范。
+这套课程按“从 0 基础到能维护大型 Qt+CMake 工程”的路径组织：先跑通 Qt Widgets/QML 示例，再看懂必要的 CMake 语法，最后掌握多应用、多库、资源、部署、测试和团队规范。
 
 ## 快速运行示例
 
